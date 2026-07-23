@@ -1,0 +1,247 @@
+### Customer Segmentation & Campaign API — end-to-end walkthrough
+### Use with the VS Code REST Client extension, or copy into Postman.
+
+@baseUrl = http://localhost:4000/api/v1
+@apiKey  = pk_live_demo_key_1
+
+### 1. Log in as admin (from seed)
+# @name login
+POST {{baseUrl}}/auth/login
+Content-Type: application/json
+
+{ "email": "admin@example.com", "password": "Admin@12345" }
+
+###
+@token = {{login.response.body.data.accessToken}}
+
+### 2. Admin creates a user
+# @name createUser
+POST {{baseUrl}}/users
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "email": "priya@example.com",
+  "password": "Priya@12345",
+  "externalId": "ext-9001",
+  "source": "admin",
+  "profile": { "firstName": "Priya", "lastName": "Nair", "country": "IN", "city": "Delhi" },
+  "tags": ["newsletter"]
+}
+
+###
+@userId = {{createUser.response.body.data.id}}
+
+### 3. Self-service signup (emits SIGNUP, seeds the score)
+POST {{baseUrl}}/auth/register
+Content-Type: application/json
+
+{
+  "email": "newuser@example.com",
+  "password": "NewUser@123",
+  "profile": { "firstName": "Rohan", "country": "IN" }
+}
+
+### 4. Complete a profile — hitting 100% auto-fires PROFILE_COMPLETED
+PATCH {{baseUrl}}/users/{{userId}}/profile
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "phone": "+919812345678",
+  "dateOfBirth": "1995-04-12",
+  "gender": "FEMALE",
+  "city": "Delhi",
+  "avatarUrl": "https://cdn.example.com/a/1.png",
+  "company": "Acme"
+}
+
+### 5. Track activity — server-to-server with an API key
+POST {{baseUrl}}/events/track
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{ "externalId": "ext-9001", "type": "PRODUCT_VIEW", "productId": "SKU-118", "category": "helmets" }
+
+### 6. Add to cart
+POST {{baseUrl}}/events/track
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{ "externalId": "ext-9001", "type": "ADD_TO_CART", "productId": "SKU-118", "value": 4599, "category": "helmets" }
+
+### 7. Purchase — idempotencyKey makes this safe to retry
+POST {{baseUrl}}/events/track
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "externalId": "ext-9001",
+  "type": "PURCHASE",
+  "orderId": "ORD-88213",
+  "value": 4599,
+  "currency": "INR",
+  "category": "helmets",
+  "idempotencyKey": "order-88213-purchase"
+}
+
+### 8. Batch ingest
+POST {{baseUrl}}/events/track/batch
+x-api-key: {{apiKey}}
+Content-Type: application/json
+
+{
+  "events": [
+    { "externalId": "ext-9001", "type": "PAGE_VIEW" },
+    { "externalId": "ext-9001", "type": "EMAIL_OPENED" }
+  ]
+}
+
+### 9. See the user's 360 view — score, breakdown, timeline, cohorts
+GET {{baseUrl}}/users/{{userId}}
+Authorization: Bearer {{token}}
+
+### 10. Force a full score recompute for one user
+POST {{baseUrl}}/users/{{userId}}/recompute-score
+Authorization: Bearer {{token}}
+
+### 11. Inspect and tune the scoring rules
+GET {{baseUrl}}/scoring/rules
+Authorization: Bearer {{token}}
+
+###
+PATCH {{baseUrl}}/scoring/rules
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "eventPoints": { "PURCHASE": 50, "ADD_TO_CART": 10 },
+  "monetary": { "enabled": true, "pointsPerCurrencyUnit": 0.02, "cap": 300 },
+  "recency": { "enabled": true, "halfLifeDays": 45 }
+}
+
+### 12. Discover the rule schema (drives a rule-builder UI)
+GET {{baseUrl}}/cohorts/schema
+Authorization: Bearer {{token}}
+
+### 13. PREVIEW a segment before saving anything
+POST {{baseUrl}}/cohorts/preview
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "limit": 10,
+  "rules": {
+    "op": "AND",
+    "conditions": [
+      { "type": "score", "operator": "gte", "value": 150 },
+      { "type": "event", "event": "ADD_TO_CART", "aggregate": "count",
+        "operator": "gte", "value": 1, "window": { "days": 7 } },
+      { "type": "event_not_performed", "event": "PURCHASE", "window": { "days": 7 } }
+    ]
+  }
+}
+
+### 14. Create the cohort
+# @name createCohort
+POST {{baseUrl}}/cohorts
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Cart Abandoners 7d",
+  "description": "Added to cart in the last week, no purchase, score 150+",
+  "refreshIntervalMinutes": 30,
+  "rules": {
+    "op": "AND",
+    "conditions": [
+      { "type": "score", "operator": "gte", "value": 150 },
+      { "type": "attribute", "field": "profile.country", "operator": "in", "value": ["IN"] },
+      { "type": "event", "event": "ADD_TO_CART", "aggregate": "count",
+        "operator": "gte", "value": 1, "window": { "days": 7 } },
+      { "type": "event_not_performed", "event": "PURCHASE", "window": { "days": 7 } }
+    ]
+  }
+}
+
+###
+@cohortId = {{createCohort.response.body.data.id}}
+
+### 15. Who is in it?
+GET {{baseUrl}}/cohorts/{{cohortId}}/members?limit=25
+Authorization: Bearer {{token}}
+
+### 16. Re-evaluate now
+POST {{baseUrl}}/cohorts/{{cohortId}}/refresh
+Authorization: Bearer {{token}}
+
+### 17. Create a targeted campaign
+# @name createCampaign
+POST {{baseUrl}}/campaigns
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{
+  "name": "Cart Recovery — 7 day window",
+  "channel": "EMAIL",
+  "cohortIds": ["{{cohortId}}"],
+  "content": {
+    "subject": "{{user.firstName | default:Hey}}, your cart is waiting",
+    "body": "<p>Hi {{user.firstName | default:there}}, you left {{user.tier}}-tier goodies behind. Finish your order today.</p>",
+    "fromName": "Store Team",
+    "fromEmail": "hello@example.com"
+  },
+  "throttle": {
+    "respectConsent": true,
+    "frequencyCapDays": 3,
+    "minScore": 150,
+    "maxRecipients": 5000,
+    "quietHours": { "enabled": true, "startHour": 21, "endHour": 8 }
+  },
+  "schedule": { "mode": "IMMEDIATE" }
+}
+
+###
+@campaignId = {{createCampaign.response.body.data.id}}
+
+### 18. Estimate reach before sending
+GET {{baseUrl}}/campaigns/{{campaignId}}/estimate
+Authorization: Bearer {{token}}
+
+### 19. Dry run first — writes Delivery rows, sends nothing
+POST {{baseUrl}}/campaigns/{{campaignId}}/launch
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "isDryRun": true }
+
+### 20. Launch for real
+# @name launch
+POST {{baseUrl}}/campaigns/{{campaignId}}/launch
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+{ "isDryRun": false, "refreshCohorts": true }
+
+###
+@runId = {{launch.response.body.data.id}}
+
+### 21. Run report — sent/failed/skipped with reasons
+GET {{baseUrl}}/campaigns/runs/{{runId}}
+Authorization: Bearer {{token}}
+
+### 22. Pause a recurring campaign
+POST {{baseUrl}}/campaigns/{{campaignId}}/pause
+Authorization: Bearer {{token}}
+
+### 23. Analytics
+GET {{baseUrl}}/users/overview
+Authorization: Bearer {{token}}
+
+###
+GET {{baseUrl}}/events/funnel
+Authorization: Bearer {{token}}
+
+###
+GET {{baseUrl}}/system/queue
+Authorization: Bearer {{token}}

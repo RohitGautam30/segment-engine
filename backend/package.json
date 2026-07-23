@@ -1,0 +1,38 @@
+{
+  "name": "segment-engine",
+  "version": "1.0.0",
+  "description": "Customer segmentation, scoring and campaign management API",
+  "main": "src/server.js",
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "start:worker": "node src/workers/worker.js",
+    "dev": "nodemon src/server.js",
+    "dev:worker": "nodemon src/workers/worker.js",
+    "seed": "node scripts/seed.js",
+    "test": "node --test tests/*.test.js",
+    "lint": "eslint src scripts tests"
+  },
+  "dependencies": {
+    "bcryptjs": "^2.4.3",
+    "compression": "^1.7.4",
+    "cors": "^2.8.5",
+    "dayjs": "^1.11.10",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "express-rate-limit": "^7.2.0",
+    "helmet": "^7.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.3.2",
+    "pino": "^8.20.0",
+    "pino-http": "^9.0.0",
+    "zod": "^3.23.4"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "nodemon": "^3.1.0",
+    "supertest": "^7.2.2"
+  }
+}
